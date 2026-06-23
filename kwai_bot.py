@@ -878,6 +878,130 @@ class KwaiBot:
         matches = sum(1 for ind in indicadores if ind in content_lower)
         return matches >= 2  # Precisa de pelo menos 2 indicadores para ter certeza
 
+    def _detectar_tela_inicial_kwai(self, xml_content: str) -> bool:
+        """Detecta se estamos na tela inicial/principal do Kwai (feed de vídeos)."""
+        if not xml_content:
+            return False
+        content_lower = xml_content.lower()
+        # Indicadores da tela inicial do Kwai (barra inferior com abas)
+        indicadores = [
+            "seguindo",
+            "descobrir",
+            "para você",
+            "para voce",
+            "camera",
+            "câmera",
+            "notificações",
+            "notificacoes",
+            "perfil",
+            "me",
+        ]
+        matches = sum(1 for ind in indicadores if ind in content_lower)
+        return matches >= 2
+
+    def _clicar_botao_rosa_kwai_golds(self, xml_content: str) -> bool:
+        """Detecta e clica no botão rosa flutuante (FAB) que leva à tela de Kwai Golds.
+        
+        O botão é redondo, rosa/gradiente, flutuante, e geralmente exibe um timer
+        e quantidade de Kwai Golds. Fica posicionado na lateral direita ou inferior da tela.
+        """
+        import re
+        
+        for match in re.finditer(r'<node[^>]*>', xml_content):
+            node_str = match.group(0)
+            
+            res_id_match = re.search(r'resource-id="([^"]*)"', node_str)
+            desc_match = re.search(r'content-desc="([^"]*)"', node_str)
+            text_match = re.search(r'text="([^"]*)"', node_str)
+            class_match = re.search(r'class="([^"]*)"', node_str)
+            
+            res_id = res_id_match.group(1).lower().strip() if res_id_match else ""
+            desc = desc_match.group(1).lower().strip() if desc_match else ""
+            text = text_match.group(1).lower().strip() if text_match else ""
+            node_class = class_match.group(1).lower().strip() if class_match else ""
+            
+            # Padrões para o botão flutuante de Kwai Golds
+            # Pode ter resource-id com "gold", "reward", "float", "fab", "bonus"
+            # Pode ter content-desc ou text com referência a golds/moedas
+            id_patterns = ["gold", "reward", "float", "fab", "bonus", "incentive", "bubble", "earning"]
+            desc_text_patterns = ["gold", "golds", "moeda", "ganhar", "recompensa", "reward"]
+            
+            found = False
+            
+            for pattern in id_patterns:
+                if pattern in res_id:
+                    found = True
+                    break
+            
+            if not found:
+                for pattern in desc_text_patterns:
+                    if pattern in desc or pattern in text:
+                        found = True
+                        break
+            
+            if found:
+                bounds_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node_str)
+                if bounds_match:
+                    x1, y1, x2, y2 = map(int, bounds_match.groups())
+                    if x1 == 0 and y1 == 0 and x2 == 0 and y2 == 0:
+                        continue
+                    
+                    # O botão é redondo/pequeno, então verificamos que não é um elemento muito grande
+                    largura = x2 - x1
+                    altura = y2 - y1
+                    if largura > self.screen_width * 0.5 or altura > self.screen_height * 0.3:
+                        continue  # Elemento muito grande, não é o FAB
+                    
+                    center_x = (x1 + x2) // 2
+                    center_y = (y1 + y2) // 2
+                    
+                    self._emit_log("info", f"🩷 [FAB] Botão rosa de Kwai Golds detectado: id='{res_id}', desc='{desc}', text='{text}' em ({center_x}, {center_y})")
+                    self.tap(center_x, center_y)
+                    return True
+        
+        # Fallback: tenta procurar um elemento clicável pequeno e redondo na área da lateral direita
+        # (o FAB geralmente fica na parte inferior-direita ou central-direita da tela)
+        for match in re.finditer(r'<node[^>]*>', xml_content):
+            node_str = match.group(0)
+            
+            clickable_match = re.search(r'clickable="([^"]*)"', node_str)
+            if not clickable_match or clickable_match.group(1) != "true":
+                continue
+                
+            bounds_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node_str)
+            if not bounds_match:
+                continue
+                
+            x1, y1, x2, y2 = map(int, bounds_match.groups())
+            largura = x2 - x1
+            altura = y2 - y1
+            center_x = (x1 + x2) // 2
+            
+            # Procura um elemento quadrado/redondo (proporção ~1:1) na metade direita da tela
+            if largura < 10 or altura < 10:
+                continue
+            proporcao = largura / altura if altura > 0 else 0
+            
+            # Botão redondo: proporção entre 0.7 e 1.4, tamanho entre 50-200px, na lateral direita
+            if (0.7 <= proporcao <= 1.4 
+                and 50 <= largura <= 250 
+                and center_x > self.screen_width * 0.6):
+                
+                # Verifica se contém alguma referência a golds no texto/desc
+                text_match = re.search(r'text="([^"]*)"', node_str)
+                desc_match = re.search(r'content-desc="([^"]*)"', node_str)
+                text = text_match.group(1).strip() if text_match else ""
+                desc = desc_match.group(1).strip() if desc_match else ""
+                
+                # Se o texto contém números (timer ou contagem de golds), é um bom candidato
+                if text and any(c.isdigit() for c in text):
+                    center_y = (y1 + y2) // 2
+                    self._emit_log("info", f"🩷 [FAB Fallback] Possível botão rosa detectado: text='{text}', desc='{desc}' em ({center_x}, {center_y})")
+                    self.tap(center_x, center_y)
+                    return True
+        
+        return False
+
     def executar_modo_anuncios(self):
         self._emit_log("info", "=== FASE 3: Assistindo Anúncios ===")
         self._emit_log("info", "Aguardando na tela do Kwai Golds (posicionada pelo usuário)...")
@@ -886,8 +1010,11 @@ class KwaiBot:
         videos_processados = 0
         total_videos = self.config["total_videos"]
         
-        TIMEOUT_ANUNCIO = 40 
+        TIMEOUT_ANUNCIO = 40
+        TIMEOUT_NAVEGANDO = 30  # Tempo máximo tentando voltar ao Kwai Golds antes de reiniciar
         inicio_anuncio = time.monotonic()
+        inicio_navegando = time.monotonic()
+        tentativas_reinicio = 0
         estado = "NoKwaiGolds"  # Assume que o usuário já está na tela do Kwai Golds
         
         try:
@@ -914,6 +1041,7 @@ class KwaiBot:
                     if estado != "NoKwaiGolds":
                         self._emit_log("info", "🧭 Tela do Kwai Golds detectada! Estado sincronizado para 'NoKwaiGolds'.")
                         estado = "NoKwaiGolds"
+                        tentativas_reinicio = 0
                 
                 # Na tela de Kwai Golds, verifica e fecha popups com "X" ou botão "Sair"
                 if estado == "NoKwaiGolds":
@@ -936,11 +1064,16 @@ class KwaiBot:
                                 self._sleep(5)
                                 estado = "Assistindo"
                                 inicio_anuncio = time.monotonic()
+                        elif "continue ganhando" in content_lower or "continuar ganhando" in content_lower:
+                            if self._click_node(xml_content, "continue ganhando", exato=False):
+                                self._emit_log("info", "🎁 Popup 'Continue ganhando Kwai Golds'! Clicando...")
+                                self._sleep(5)
+                                estado = "Assistindo"
+                                inicio_anuncio = time.monotonic()
                         else:
-                            self._emit_log("warning", "Não encontrou 'Assistir a anúncios'. Tentando voltar em vez de reiniciar o app...")
-                            self.adb_shell("input", "keyevent", "KEYCODE_BACK")
-                            self._sleep(3)
+                            self._emit_log("warning", "Não encontrou 'Assistir a anúncios'. Entrando em modo de navegação...")
                             estado = "Navegando"
+                            inicio_navegando = time.monotonic()
                             
                 elif estado == "Assistindo":
                     # --- Detectar botão "Sair" após anúncio terminar ---
@@ -955,6 +1088,7 @@ class KwaiBot:
                             estado = "NoKwaiGolds"
                         else:
                             estado = "Navegando"
+                            inicio_navegando = time.monotonic()
                         videos_processados += 1
                         self.stats["videos_assistidos"] += 1
                         self._emit_stats()
@@ -993,7 +1127,8 @@ class KwaiBot:
                             self._emit_log("warning", "🚨 Muito tempo preso no anúncio. Voltando em vez de fechar o app...")
                             self.adb_shell("input", "keyevent", "KEYCODE_BACK")
                             self._sleep(3)
-                            estado = "NoKwaiGolds"
+                            estado = "Navegando"
+                            inicio_navegando = time.monotonic()
                             continue
                             
                         self._emit_log("info", f"⏳ Timeout ({TIMEOUT_ANUNCIO}s). Apertando <- para tentar pular...")
@@ -1003,12 +1138,67 @@ class KwaiBot:
                         
                     self._sleep(2)
                 
-                else:
-                    # Se houver popups bloqueando no estado Navegando, tenta fechá-los primeiro (ex: múltiplos popups de sair/X)
+                else:  # estado == "Navegando"
+                    tempo_navegando = time.monotonic() - inicio_navegando
+                    
+                    # 1. Tenta fechar popups (X ou Sair) que estejam no caminho
                     if self.clicar_x_popup(xml_content):
+                        self._emit_log("info", "🧭 [Navegando] Popup fechado. Verificando tela...")
                         self._sleep(2)
                         continue
-                    self._emit_log("info", "🧭 Estado 'Navegando': aguardando voltar para a tela do Kwai Golds (apertando voltar)...")
+                    
+                    # 2. Se estiver na tela inicial do Kwai, procura o botão rosa flutuante
+                    if self._detectar_tela_inicial_kwai(xml_content):
+                        self._emit_log("info", "🏠 [Navegando] Tela inicial do Kwai detectada! Procurando botão rosa de Kwai Golds...")
+                        if self._clicar_botao_rosa_kwai_golds(xml_content):
+                            self._emit_log("info", "🩷 [Navegando] Botão rosa clicado! Aguardando tela de Kwai Golds...")
+                            self._sleep(5)
+                            continue
+                        else:
+                            self._emit_log("warning", "🩷 [Navegando] Botão rosa não encontrado no XML. Tentando BACK...")
+                            self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                            self._sleep(3)
+                            continue
+                    
+                    # 3. Se demorar demais (TIMEOUT_NAVEGANDO), reinicia o app e procura o botão rosa
+                    if tempo_navegando > TIMEOUT_NAVEGANDO:
+                        tentativas_reinicio += 1
+                        self._emit_log("warning", f"🚨 [Navegando] Timeout de {TIMEOUT_NAVEGANDO}s! Reiniciando o app (tentativa {tentativas_reinicio})...")
+                        self.fechar_kwai()
+                        self._sleep(2)
+                        self.manter_tela_ligada()
+                        self.abrir_kwai()
+                        self._sleep(4)
+                        
+                        # Fecha popups que aparecerem após abrir o app
+                        for _ in range(3):
+                            if not self._running:
+                                break
+                            self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
+                            xml_reopen = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+                            if xml_reopen and "xml" in xml_reopen:
+                                # Se já voltou pro Kwai Golds, ótimo!
+                                if self._verificar_tela_kwai_golds(xml_reopen):
+                                    self._emit_log("info", "✅ [Navegando] Voltou para Kwai Golds após reinício!")
+                                    estado = "NoKwaiGolds"
+                                    tentativas_reinicio = 0
+                                    break
+                                # Tenta fechar popups
+                                if self.clicar_x_popup(xml_reopen):
+                                    self._sleep(2)
+                                    continue
+                                # Tenta clicar no botão rosa
+                                if self._clicar_botao_rosa_kwai_golds(xml_reopen):
+                                    self._emit_log("info", "🩷 [Navegando] Botão rosa clicado após reinício! Aguardando...")
+                                    self._sleep(5)
+                                    break
+                            self._sleep(2)
+                        
+                        inicio_navegando = time.monotonic()
+                        continue
+                    
+                    # 4. Fallback: tenta BACK genérico
+                    self._emit_log("info", f"🧭 [Navegando] Tentando voltar para Kwai Golds ({tempo_navegando:.0f}s/{TIMEOUT_NAVEGANDO}s)...")
                     self.adb_shell("input", "keyevent", "KEYCODE_BACK")
                     self._sleep(3)
                 
