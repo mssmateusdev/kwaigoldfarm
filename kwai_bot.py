@@ -1004,6 +1004,10 @@ class KwaiBot:
                     self._sleep(2)
                 
                 else:
+                    # Se houver popups bloqueando no estado Navegando, tenta fechá-los primeiro (ex: múltiplos popups de sair/X)
+                    if self.clicar_x_popup(xml_content):
+                        self._sleep(2)
+                        continue
                     self._emit_log("info", "🧭 Estado 'Navegando': aguardando voltar para a tela do Kwai Golds (apertando voltar)...")
                     self.adb_shell("input", "keyevent", "KEYCODE_BACK")
                     self._sleep(3)
