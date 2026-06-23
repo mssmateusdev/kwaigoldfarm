@@ -680,13 +680,13 @@ class KwaiBot:
         self._sleep(1)
 
     def clicar_x_popup(self, xml_content: str) -> bool:
-        """Tenta encontrar um botão/ícone de fechar (X) no XML da tela e clica nele."""
+        """Tenta encontrar um botão/ícone de fechar (X) ou 'sair' no XML da tela e clica nele."""
         import re
         
         # Padrões comuns para botão de fechar no resource-id ou content-desc ou text
         id_patterns = ["close", "dismiss", "cancel", "exit", "btn_close", "close_btn", "close_button", "iv_close", "img_close"]
-        desc_patterns = ["fechar", "close", "cancelar", "descartar", "cancel", "dismiss"]
-        text_patterns = ["x", "✕", "×", "fechar", "close"]
+        desc_patterns = ["fechar", "close", "cancelar", "descartar", "cancel", "dismiss", "sair"]
+        text_patterns = ["x", "✕", "×", "fechar", "close", "sair"]
         
         for match in re.finditer(r'<node[^>]*>', xml_content):
             node_str = match.group(0)
@@ -695,9 +695,9 @@ class KwaiBot:
             desc_match = re.search(r'content-desc="([^"]*)"', node_str)
             text_match = re.search(r'text="([^"]*)"', node_str)
             
-            res_id = res_id_match.group(1).lower() if res_id_match else ""
-            desc = desc_match.group(1).lower() if desc_match else ""
-            text = text_match.group(1).lower() if text_match else ""
+            res_id = res_id_match.group(1).lower().strip() if res_id_match else ""
+            desc = desc_match.group(1).lower().strip() if desc_match else ""
+            text = text_match.group(1).lower().strip() if text_match else ""
             
             found = False
             
@@ -729,7 +729,7 @@ class KwaiBot:
                     center_x = (x1 + x2) // 2
                     center_y = (y1 + y2) // 2
                     
-                    self._emit_log("info", f"🎯 [Popup] Botão 'X' detectado: id='{res_id}', desc='{desc}', text='{text}' em ({center_x}, {center_y})")
+                    self._emit_log("info", f"🎯 [Popup] Botão de fechar detectado: id='{res_id}', desc='{desc}', text='{text}' em ({center_x}, {center_y})")
                     self.tap(center_x, center_y)
                     return True
                     
@@ -794,7 +794,7 @@ class KwaiBot:
     def _click_node(self, xml_content: str, text_to_find: str, exato=False) -> bool:
         """Procura um nó no XML com o texto ou content-desc dado e clica nele."""
         import re
-        text_lower = text_to_find.lower()
+        text_lower = text_to_find.lower().strip()
         
         for match in re.finditer(r'<node[^>]*>', xml_content):
             node_str = match.group(0)
@@ -802,8 +802,8 @@ class KwaiBot:
             text_match = re.search(r'text="([^"]*)"', node_str)
             desc_match = re.search(r'content-desc="([^"]*)"', node_str)
             
-            node_text = text_match.group(1).lower() if text_match else ""
-            node_desc = desc_match.group(1).lower() if desc_match else ""
+            node_text = text_match.group(1).lower().strip() if text_match else ""
+            node_desc = desc_match.group(1).lower().strip() if desc_match else ""
             
             found = False
             if exato:
@@ -817,6 +817,8 @@ class KwaiBot:
                 bounds_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node_str)
                 if bounds_match:
                     x1, y1, x2, y2 = map(int, bounds_match.groups())
+                    if x1 == 0 and y1 == 0 and x2 == 0 and y2 == 0:
+                        continue
                     center_x = (x1 + x2) // 2
                     center_y = (y1 + y2) // 2
                     self.tap(center_x, center_y)
@@ -907,7 +909,13 @@ class KwaiBot:
                     self._sleep(2)
                     continue
                 
-                # Na tela de Kwai Golds, verifica e fecha popups com "X"
+                # Detecta se a tela do Kwai Golds está ativa e sincroniza o estado
+                if self._verificar_tela_kwai_golds(xml_content):
+                    if estado != "NoKwaiGolds":
+                        self._emit_log("info", "🧭 Tela do Kwai Golds detectada! Estado sincronizado para 'NoKwaiGolds'.")
+                        estado = "NoKwaiGolds"
+                
+                # Na tela de Kwai Golds, verifica e fecha popups com "X" ou botão "Sair"
                 if estado == "NoKwaiGolds":
                     if self.clicar_x_popup(xml_content):
                         self._sleep(2)
@@ -994,6 +1002,11 @@ class KwaiBot:
                         continue
                         
                     self._sleep(2)
+                
+                else:
+                    self._emit_log("info", "🧭 Estado 'Navegando': aguardando voltar para a tela do Kwai Golds (apertando voltar)...")
+                    self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                    self._sleep(3)
                 
         except Exception as e:
             self._emit_log("error", f"Erro inesperado no Modo Anúncios: {e}")
