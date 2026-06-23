@@ -1,0 +1,21 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PyInstaller / Build
+build/
+dist/
+*.spec
+
+# Application Logs
+*.log
+
+# ADB binaries (can be downloaded separately or kept locally)
+adb.exe
+AdbWinApi.dll
+AdbWinUsbApi.dll
