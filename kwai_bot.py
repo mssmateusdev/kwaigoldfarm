@@ -30,6 +30,7 @@ import argparse
 import sys
 import os
 import logging
+import uiautomator2 as u2
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -134,6 +135,7 @@ class KwaiBot:
         self.config = config
         self.adb = ADB_PATH
         self.device_id = None
+        self.d = None  # Instância do uiautomator2
         self.screen_width = 0
         self.screen_height = 0
         self.kwai_package = None
@@ -279,6 +281,15 @@ class KwaiBot:
                 "android": android_ver,
             })
 
+        # Inicializa o UIAutomator2
+        self._emit_log("info", "Iniciando servidor UIAutomator2 no dispositivo...")
+        try:
+            self.d = u2.connect(self.device_id)
+            self._emit_log("info", "UIAutomator2 conectado com sucesso!")
+        except Exception as e:
+            self._emit_log("error", f"Falha ao conectar UIAutomator2: {e}")
+            return False
+
         return True
 
     def obter_resolucao(self):
@@ -346,12 +357,34 @@ class KwaiBot:
             )
             self._sleep(2)
 
+    # ─── Análise de Tela ──────────────────────────────────
+
+    def obter_xml_tela(self) -> str:
+        """Obtém o dump da hierarquia atual da tela, priorizando o uiautomator2."""
+        try:
+            if self.d:
+                # Retorna a hierarquia XML inteira de forma quase instantânea
+                return self.d.dump_hierarchy()
+            else:
+                self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
+                return self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+        except Exception as e:
+            self._emit_log("error", f"Falha ao ler XML da tela: {e}")
+            return ""
+
     # ─── Gestos ───────────────────────────────────────────
 
     def tap(self, x: int, y: int):
         x += random.randint(-5, 5)
         y += random.randint(-5, 5)
-        self.adb_shell("input", "tap", str(x), str(y))
+        try:
+            if self.d:
+                self.d.click(x, y)
+            else:
+                self.adb_shell("input", "tap", str(x), str(y))
+        except Exception as e:
+            self._emit_log("warning", f"Erro no u2.click: {e}. Usando fallback ADB...")
+            self.adb_shell("input", "tap", str(x), str(y))
 
     def swipe(self, x1, y1, x2, y2, duracao=300):
         x1 += random.randint(-10, 10)
@@ -359,7 +392,18 @@ class KwaiBot:
         x2 += random.randint(-10, 10)
         y2 += random.randint(-10, 10)
         duracao += random.randint(-50, 100)
-        self.adb_shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duracao))
+        
+        # O uiautomator2 usa duração em float (segundos). 300ms = 0.3s
+        duracao_segundos = max(0.05, duracao / 1000.0)
+        
+        try:
+            if self.d:
+                self.d.swipe(x1, y1, x2, y2, duracao_segundos)
+            else:
+                self.adb_shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), str(int(duracao)))
+        except Exception as e:
+            self._emit_log("warning", f"Erro no u2.swipe: {e}. Usando fallback ADB...")
+            self.adb_shell("input", "swipe", str(x1), str(y1), str(x2), str(y2), str(int(duracao)))
 
     def swipe_proximo_video(self):
         center_x = self.screen_width // 2
@@ -739,8 +783,7 @@ class KwaiBot:
 
     def fechar_popups(self):
         self._emit_log("info", "Verificando e fechando popups...")
-        self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
-        xml_content = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+        xml_content = self.obter_xml_tela()
         
         if xml_content and "xml" in xml_content:
             if self.clicar_x_popup(xml_content):
@@ -769,8 +812,7 @@ class KwaiBot:
 
             # 2. Verifica pela hierarquia da tela (XML)
             if xml_content is None:
-                self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
-                xml_content = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+                xml_content = self.obter_xml_tela()
                 
             if not xml_content or "xml" not in xml_content:
                 return False
@@ -1031,8 +1073,7 @@ class KwaiBot:
                     self._sleep(3)
                     continue
 
-                self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
-                xml_content = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+                xml_content = self.obter_xml_tela()
                 
                 if not xml_content or "xml" not in xml_content:
                     self._sleep(2)
@@ -1083,8 +1124,7 @@ class KwaiBot:
                         self._emit_log("info", "🚪 Botão 'Sair' detectado! Clicando para voltar ao Kwai Golds...")
                         self._sleep(3)
                         # Verifica se voltou para a tela do Kwai Golds
-                        self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
-                        xml_pos_sair = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+                        xml_pos_sair = self.obter_xml_tela()
                         if xml_pos_sair and self._verificar_tela_kwai_golds(xml_pos_sair):
                             self._emit_log("info", "✅ Voltou para a tela do Kwai Golds com sucesso.")
                             estado = "NoKwaiGolds"
@@ -1176,8 +1216,7 @@ class KwaiBot:
                         for _ in range(3):
                             if not self._running:
                                 break
-                            self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
-                            xml_reopen = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+                            xml_reopen = self.obter_xml_tela()
                             if xml_reopen and "xml" in xml_reopen:
                                 # Se já voltou pro Kwai Golds, ótimo!
                                 if self._verificar_tela_kwai_golds(xml_reopen):
@@ -1281,8 +1320,7 @@ class KwaiBot:
                         self._sleep(2)
 
                     # --- ANÁLISE CONSTANTE DE TELA (POPUPS E LIVES) ---
-                    self.adb_shell("uiautomator", "dump", "/data/local/tmp/uidump.xml", timeout=6)
-                    xml_content = self.adb_shell("cat", "/data/local/tmp/uidump.xml", timeout=6)
+                    xml_content = self.obter_xml_tela()
                     
                     if xml_content and "xml" in xml_content:
                         if self.clicar_x_popup(xml_content):

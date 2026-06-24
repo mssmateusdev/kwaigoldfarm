@@ -66,6 +66,9 @@ def build():
         "--hidden-import=PIL",
         "--hidden-import=PIL._tkinter_finder",
         "--hidden-import=darkdetect",
+        "--hidden-import=uiautomator2",
+        "--hidden-import=adbutils",
+        "--hidden-import=lxml",
 
         # Sem confirmações
         "--noconfirm",
