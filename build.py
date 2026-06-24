@@ -69,6 +69,10 @@ def build():
         "--hidden-import=uiautomator2",
         "--hidden-import=adbutils",
         "--hidden-import=lxml",
+        
+        # Coletar dados extras dos pacotes (como arquivos .jar e .apk nativos do uiautomator2)
+        "--collect-data=uiautomator2",
+        "--collect-data=adbutils",
 
         # Sem confirmações
         "--noconfirm",
