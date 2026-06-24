@@ -388,8 +388,9 @@ class KwaiBot:
         
         if escolha == "TOQUE_ALEATORIO":
             self._emit_log("info", "🤖 [Evasão] Simulando toque aleatório inofensivo...")
-            x = random.randint(int(self.screen_width * 0.1), int(self.screen_width * 0.9))
-            y = random.randint(int(self.screen_height * 0.2), int(self.screen_height * 0.8))
+            # Limita a largura entre 30% e 70% para evitar clicar no FAB (botão de bônus) nas laterais
+            x = random.randint(int(self.screen_width * 0.3), int(self.screen_width * 0.7))
+            y = random.randint(int(self.screen_height * 0.3), int(self.screen_height * 0.7))
             self.tap(x, y)
             self._sleep(random.uniform(0.5, 1.2) * fator)
             
@@ -523,7 +524,8 @@ class KwaiBot:
         """Simula um swipe horizontal leve (como se estivesse explorando)."""
         self._emit_log("info", "👈 [Evasão] Simulando swipe horizontal exploratório...")
         center_y = int(self.screen_height * random.uniform(0.3, 0.7))
-        start_x = int(self.screen_width * random.uniform(0.6, 0.85))
+        # Ajustado para começar um pouco menos à direita e não arrastar acidentalmente o FAB
+        start_x = int(self.screen_width * random.uniform(0.55, 0.75))
         end_x = int(self.screen_width * random.uniform(0.15, 0.4))
         duracao = random.randint(300, 600)
         self.swipe(start_x, center_y, end_x, center_y, duracao)
@@ -1284,6 +1286,13 @@ class KwaiBot:
                     
                     if xml_content and "xml" in xml_content:
                         if self.clicar_x_popup(xml_content):
+                            self._sleep(2)
+                            continue
+                            
+                        # Verifica se clicou acidentalmente no botão de Kwai Golds (FAB)
+                        if self._verificar_tela_kwai_golds(xml_content):
+                            self._emit_log("warning", "⚠️ Tela de Kwai Golds detectada acidentalmente! Voltando para os vídeos...")
+                            self.adb_shell("input", "keyevent", "KEYCODE_BACK")
                             self._sleep(2)
                             continue
 
