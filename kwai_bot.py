@@ -869,6 +869,81 @@ class KwaiBot:
                     return True
         return False
 
+    def _clicar_botao_sair(self, xml_content: str = None) -> bool:
+        """Tenta encontrar e clicar no botão 'Sair' usando múltiplas estratégias.
+        
+        Estratégia 1: Usa a API nativa do uiautomator2 para buscar o elemento por texto.
+        Estratégia 2: Faz busca flexível no XML por variações de 'sair'.
+        Estratégia 3: Se detectar o popup de 'Ganhar mais'/'Assista mais um', 
+                       clica na posição inferior onde 'Sair' costuma ficar.
+        """
+        import re
+        
+        # --- Estratégia 1: API nativa do uiautomator2 ---
+        try:
+            if self.d:
+                for texto_sair in ["Sair", "sair", "SAIR"]:
+                    el = self.d(text=texto_sair)
+                    if el.exists(timeout=1):
+                        self._emit_log("info", f"🚪 [u2] Botão '{texto_sair}' encontrado via API nativa! Clicando...")
+                        el.click()
+                        return True
+                        
+                # Busca por textContains (caso tenha espaços extras)
+                el = self.d(textContains="air")
+                if el.exists(timeout=0.5):
+                    info = el.info
+                    text_val = info.get("text", "")
+                    if text_val.strip().lower() == "sair":
+                        self._emit_log("info", f"🚪 [u2] Botão 'Sair' encontrado (textContains)! Clicando...")
+                        el.click()
+                        return True
+        except Exception as e:
+            self._emit_log("debug", f"Busca u2 por 'Sair' falhou: {e}")
+        
+        # --- Estratégia 2: Busca flexível no XML ---
+        if xml_content:
+            for match in re.finditer(r'<node[^>]*>', xml_content):
+                node_str = match.group(0)
+                
+                text_match = re.search(r'text="([^"]*)"', node_str)
+                desc_match = re.search(r'content-desc="([^"]*)"', node_str)
+                
+                node_text = text_match.group(1).strip().lower() if text_match else ""
+                node_desc = desc_match.group(1).strip().lower() if desc_match else ""
+                
+                if node_text == "sair" or node_desc == "sair":
+                    bounds_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node_str)
+                    if bounds_match:
+                        x1, y1, x2, y2 = map(int, bounds_match.groups())
+                        if x1 == 0 and y1 == 0 and x2 == 0 and y2 == 0:
+                            continue
+                        center_x = (x1 + x2) // 2
+                        center_y = (y1 + y2) // 2
+                        self._emit_log("info", f"🚪 [XML] Botão 'Sair' detectado em ({center_x}, {center_y}). Clicando...")
+                        self.tap(center_x, center_y)
+                        return True
+        
+        # --- Estratégia 3: Detecção do popup por contexto e clique posicional ---
+        xml_to_check = xml_content or ""
+        content_lower = xml_to_check.lower()
+        popup_indicators = [
+            "assista mais um para ganhar",
+            "ganhar mais",
+            "assista mais um",
+            "assista um para ganhar",
+        ]
+        
+        for indicator in popup_indicators:
+            if indicator in content_lower:
+                sair_x = self.screen_width // 2
+                sair_y = int(self.screen_height * 0.78)
+                self._emit_log("info", f"🚪 [Posicional] Popup de 'ganhar mais' detectado. Clicando em 'Sair' na posição ({sair_x}, {sair_y})...")
+                self.tap(sair_x, sair_y)
+                return True
+        
+        return False
+
     # ─── Loop Principal ───────────────────────────────────
 
     def assistir_video(self, numero: int):
@@ -1120,7 +1195,7 @@ class KwaiBot:
                             
                 elif estado == "Assistindo":
                     # --- Detectar botão "Sair" após anúncio terminar ---
-                    if self._click_node(xml_content, "sair", exato=True):
+                    if self._clicar_botao_sair(xml_content):
                         self._emit_log("info", "🚪 Botão 'Sair' detectado! Clicando para voltar ao Kwai Golds...")
                         self._sleep(3)
                         # Verifica se voltou para a tela do Kwai Golds
