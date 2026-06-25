@@ -281,8 +281,9 @@ class KwaiBot:
                 "android": android_ver,
             })
 
-        # Aplica o patch Anti-Emulador
-        self._ocultar_emulador()
+        # Aplica o patch Anti-Emulador se habilitado na interface
+        if self.config.get("anti_emulador", True):
+            self._ocultar_emulador()
 
         # Inicializa o UIAutomator2
         self._emit_log("info", "Iniciando servidor UIAutomator2 no dispositivo...")

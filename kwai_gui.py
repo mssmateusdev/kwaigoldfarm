@@ -712,8 +712,20 @@ class KwaiBotGUI(ctk.CTk):
             button_color=COLORS["text_secondary"],
             button_hover_color=COLORS["accent_hover"],
         )
-        self.pausas_check.pack(anchor="w", pady=(0, 8))
+        self.pausas_check.pack(anchor="w", pady=(0, 4))
 
+        # Anti-Emulador toggle
+        self.anti_emulador_var = ctk.BooleanVar(value=True)
+        self.anti_emulador_check = ctk.CTkSwitch(
+            col4, text="Anti-Emulador",
+            font=(FONT_FAMILY, 11),
+            text_color=COLORS["text_dim"],
+            variable=self.anti_emulador_var,
+            progress_color=COLORS["accent"],
+            button_color=COLORS["text_secondary"],
+            button_hover_color=COLORS["accent_hover"],
+        )
+        self.anti_emulador_check.pack(anchor="w", pady=(0, 8))
         # Botões
         btn_frame = ctk.CTkFrame(col4, fg_color="transparent")
         btn_frame.pack(anchor="w")
@@ -864,6 +876,7 @@ class KwaiBotGUI(ctk.CTk):
             "pausas": self.pausas_var.get(),
             "device_id": selected_device,
             "modo": self.modo_var.get(),
+            "anti_emulador": self.anti_emulador_var.get(),
         }
 
         callbacks = {
