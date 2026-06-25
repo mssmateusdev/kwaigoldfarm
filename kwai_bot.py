@@ -281,6 +281,9 @@ class KwaiBot:
                 "android": android_ver,
             })
 
+        # Aplica o patch Anti-Emulador
+        self._ocultar_emulador()
+
         # Inicializa o UIAutomator2
         self._emit_log("info", "Iniciando servidor UIAutomator2 no dispositivo...")
         try:
@@ -291,6 +294,20 @@ class KwaiBot:
             return False
 
         return True
+
+    def _ocultar_emulador(self):
+        """Tenta modificar as propriedades do emulador no build.prop via ADB com root."""
+        self._emit_log("info", "🔧 Aplicando patch Anti-Emulador (modificando build.prop)...")
+        # Remonta a partição system como leitura e escrita
+        self.adb_shell("su", "-c", "mount -o rw,remount /system")
+        
+        # Verifica se a propriedade existe, se não adiciona, se existir altera
+        self.adb_shell("su", "-c", "sed -i 's/^ro.kernel.qemu=.*/ro.kernel.qemu=0/g' /system/build.prop")
+        self.adb_shell("su", "-c", "grep -q '^ro.kernel.qemu=' /system/build.prop || echo 'ro.kernel.qemu=0' >> /system/build.prop")
+
+        # Atualiza a propriedade em tempo de execução para ter efeito sem reiniciar (depende de root/resetprop)
+        self.adb_shell("su", "-c", "setprop ro.kernel.qemu 0")
+        self._emit_log("info", "✅ Patch Anti-Emulador aplicado com sucesso.")
 
     def obter_resolucao(self):
         output = self.adb_shell("wm", "size")
