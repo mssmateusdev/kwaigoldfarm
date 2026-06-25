@@ -301,18 +301,103 @@ class KwaiBot:
         # Remonta a partição system como leitura e escrita
         self.adb_shell("su", "-c", "mount -o rw,remount /system")
         
-        # Lista de propriedades para disfarçar o emulador (focando em hardware MediaTek genérico do A04e)
-        props = {
+        import random
+        perfis_dispositivos = [
+            {
+                "nome": "Samsung Galaxy A04e",
+                "props": {
+                    "ro.product.brand": "samsung",
+                    "ro.product.model": "SM-A042M",
+                    "ro.product.name": "a04emx",
+                    "ro.product.device": "a04e",
+                    "ro.product.manufacturer": "samsung",
+                    "ro.hardware": "mt6765",
+                    "ro.product.board": "mt6765",
+                    "ro.boot.hardware": "mt6765"
+                }
+            },
+            {
+                "nome": "Xiaomi Poco X5 Pro 5G",
+                "props": {
+                    "ro.product.brand": "POCO",
+                    "ro.product.model": "22101320G",
+                    "ro.product.name": "redwood",
+                    "ro.product.device": "redwood",
+                    "ro.product.manufacturer": "Xiaomi",
+                    "ro.hardware": "qcom",
+                    "ro.product.board": "sm7325",
+                    "ro.boot.hardware": "qcom"
+                }
+            },
+            {
+                "nome": "Samsung Galaxy M52 5G",
+                "props": {
+                    "ro.product.brand": "samsung",
+                    "ro.product.model": "SM-M526BR",
+                    "ro.product.name": "m52xsq",
+                    "ro.product.device": "m52x",
+                    "ro.product.manufacturer": "samsung",
+                    "ro.hardware": "qcom",
+                    "ro.product.board": "lahaina",
+                    "ro.boot.hardware": "qcom"
+                }
+            },
+            {
+                "nome": "Samsung Galaxy S23",
+                "props": {
+                    "ro.product.brand": "samsung",
+                    "ro.product.model": "SM-S911B",
+                    "ro.product.name": "kalama",
+                    "ro.product.device": "kalama",
+                    "ro.product.manufacturer": "samsung",
+                    "ro.hardware": "qcom",
+                    "ro.product.board": "kalama",
+                    "ro.boot.hardware": "qcom"
+                }
+            },
+            {
+                "nome": "Samsung Galaxy S24 Ultra",
+                "props": {
+                    "ro.product.brand": "samsung",
+                    "ro.product.model": "SM-S928B",
+                    "ro.product.name": "pineapple",
+                    "ro.product.device": "pineapple",
+                    "ro.product.manufacturer": "samsung",
+                    "ro.hardware": "qcom",
+                    "ro.product.board": "pineapple",
+                    "ro.boot.hardware": "qcom"
+                }
+            },
+            {
+                "nome": "Motorola Edge 30",
+                "props": {
+                    "ro.product.brand": "motorola",
+                    "ro.product.model": "motorola edge 30",
+                    "ro.product.name": "dubai_g",
+                    "ro.product.device": "dubai",
+                    "ro.product.manufacturer": "motorola",
+                    "ro.hardware": "qcom",
+                    "ro.product.board": "lito",
+                    "ro.boot.hardware": "qcom"
+                }
+            }
+        ]
+        
+        perfil_escolhido = random.choice(perfis_dispositivos)
+        self._emit_log("info", f"📱 Perfil de hardware selecionado: {perfil_escolhido['nome']}")
+        
+        # Propriedades genéricas de evasão aplicadas a todos
+        props_evasao = {
             "ro.kernel.qemu": "0",
-            "ro.build.tags": "release-keys",       # Sai de test-keys para release-keys
-            "ro.build.type": "user",               # Indica build para usuário final (não eng/userdebug)
-            "ro.hardware": "mt6765",               # Processador genérico MediaTek (combina com SM-A042M)
-            "ro.product.board": "mt6765",
-            "ro.boot.hardware": "mt6765",
-            "ro.build.characteristics": "default"  # Remove flags como 'tablet' ou 'emulator'
+            "ro.build.tags": "release-keys",
+            "ro.build.type": "user",
+            "ro.build.characteristics": "default"
         }
         
-        for key, value in props.items():
+        # Junta as propriedades específicas do dispositivo escolhido com as genéricas
+        todas_props = {**props_evasao, **perfil_escolhido["props"]}
+        
+        for key, value in todas_props.items():
             # Substitui se já existir
             cmd_sed = f"sed -i 's/^{key}=.*/{key}={value}/g' /system/build.prop"
             self.adb_shell("su", "-c", cmd_sed)
@@ -321,8 +406,8 @@ class KwaiBot:
             cmd_grep = f"grep -q '^{key}=' /system/build.prop || echo '{key}={value}' >> /system/build.prop"
             self.adb_shell("su", "-c", cmd_grep)
 
-            # Tenta alterar em tempo de execução
-            self.adb_shell("su", "-c", f"setprop {key} {value}")
+            # Tenta alterar em tempo de execução (usando aspas para valores com espaços)
+            self.adb_shell("su", "-c", f"setprop {key} '{value}'")
 
         self._emit_log("info", "✅ Patch Anti-Emulador avançado aplicado com sucesso.")
 
