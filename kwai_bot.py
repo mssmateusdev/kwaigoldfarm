@@ -1313,6 +1313,20 @@ class KwaiBot:
                             inicio_navegando = time.monotonic()
                             
                 elif estado == "Assistindo":
+                    if "este vídeo não está mais aqui" in content_lower or "faça uma pausa" in content_lower:
+                        self._emit_log("warning", "🚨 [SHADOWBAN DETECTADO] O Kwai bloqueou os anúncios para esta conta/aparelho!")
+                        self._emit_log("warning", "👉 Dica: Troque o IP (reinicie roteador/dados móveis) e limpe os dados do Kwai.")
+                        if self._clicar_botao_sair(xml_content):
+                            self._sleep(3)
+                        else:
+                            self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                            self._sleep(2)
+                        
+                        # Retorna para o feed normal para dar uma pausa
+                        estado = "Navegando"
+                        inicio_navegando = time.monotonic()
+                        continue
+
                     # --- Detectar botão "Sair" após anúncio terminar ---
                     if self._clicar_botao_sair(xml_content):
                         self._emit_log("info", "🚪 Botão 'Sair' detectado! Clicando para voltar ao Kwai Golds...")
@@ -1330,6 +1344,7 @@ class KwaiBot:
                         self._emit_stats()
                         inicio_anuncio = time.monotonic()
                         continue
+
 
                     if "continuar para obter moedas" in content_lower:
                         self._emit_log("info", "💰 Anúncio finalizado! Coletando recompensa...")
