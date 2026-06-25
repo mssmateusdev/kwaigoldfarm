@@ -297,17 +297,34 @@ class KwaiBot:
 
     def _ocultar_emulador(self):
         """Tenta modificar as propriedades do emulador no build.prop via ADB com root."""
-        self._emit_log("info", "🔧 Aplicando patch Anti-Emulador (modificando build.prop)...")
+        self._emit_log("info", "🔧 Aplicando patch Anti-Emulador avançado (modificando build.prop)...")
         # Remonta a partição system como leitura e escrita
         self.adb_shell("su", "-c", "mount -o rw,remount /system")
         
-        # Verifica se a propriedade existe, se não adiciona, se existir altera
-        self.adb_shell("su", "-c", "sed -i 's/^ro.kernel.qemu=.*/ro.kernel.qemu=0/g' /system/build.prop")
-        self.adb_shell("su", "-c", "grep -q '^ro.kernel.qemu=' /system/build.prop || echo 'ro.kernel.qemu=0' >> /system/build.prop")
+        # Lista de propriedades para disfarçar o emulador (focando em hardware MediaTek genérico do A04e)
+        props = {
+            "ro.kernel.qemu": "0",
+            "ro.build.tags": "release-keys",       # Sai de test-keys para release-keys
+            "ro.build.type": "user",               # Indica build para usuário final (não eng/userdebug)
+            "ro.hardware": "mt6765",               # Processador genérico MediaTek (combina com SM-A042M)
+            "ro.product.board": "mt6765",
+            "ro.boot.hardware": "mt6765",
+            "ro.build.characteristics": "default"  # Remove flags como 'tablet' ou 'emulator'
+        }
+        
+        for key, value in props.items():
+            # Substitui se já existir
+            cmd_sed = f"sed -i 's/^{key}=.*/{key}={value}/g' /system/build.prop"
+            self.adb_shell("su", "-c", cmd_sed)
+            
+            # Adiciona no final se não existir
+            cmd_grep = f"grep -q '^{key}=' /system/build.prop || echo '{key}={value}' >> /system/build.prop"
+            self.adb_shell("su", "-c", cmd_grep)
 
-        # Atualiza a propriedade em tempo de execução para ter efeito sem reiniciar (depende de root/resetprop)
-        self.adb_shell("su", "-c", "setprop ro.kernel.qemu 0")
-        self._emit_log("info", "✅ Patch Anti-Emulador aplicado com sucesso.")
+            # Tenta alterar em tempo de execução
+            self.adb_shell("su", "-c", f"setprop {key} {value}")
+
+        self._emit_log("info", "✅ Patch Anti-Emulador avançado aplicado com sucesso.")
 
     def obter_resolucao(self):
         output = self.adb_shell("wm", "size")
