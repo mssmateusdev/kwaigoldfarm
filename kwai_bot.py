@@ -895,6 +895,11 @@ class KwaiBot:
                     center_x = (x1 + x2) // 2
                     center_y = (y1 + y2) // 2
                     
+                    if hasattr(self, 'screen_width') and self.screen_width > 0:
+                        # Ignora o "X" do bônus Kwai Golds que fica no canto esquerdo da tela (ex: popup de moedas)
+                        if center_x < (self.screen_width * 0.35) and (self.screen_height * 0.3) < center_y < (self.screen_height * 0.7):
+                            continue
+                    
                     self._emit_log("info", f"🎯 [Popup] Botão de fechar detectado: id='{res_id}', desc='{desc}', text='{text}' em ({center_x}, {center_y})")
                     self.tap(center_x, center_y)
                     return True
@@ -1571,6 +1576,30 @@ class KwaiBot:
 
                     if current_video_idx % 15 == 0:
                         self.manter_tela_ligada()
+
+                    # --- VERIFICAR SE ESTÁ NA ABA 'PARA VOCÊ' ---
+                    para_voce_match = re.search(r'<node[^>]*text="Para você"[^>]*selected="([^"]+)"', xml_content, re.IGNORECASE)
+                    if para_voce_match:
+                        is_selected = para_voce_match.group(1).lower() == "true"
+                        if not is_selected:
+                            self._emit_log("info", "🔄 Retornando para a aba 'Para você'...")
+                            self._click_node(xml_content, "Para você", exato=False)
+                            self._sleep(2)
+                            xml_content = self.obter_xml_tela() # Atualiza o xml após mudar de aba
+
+                    # --- ABRIR COMENTÁRIOS ALEATORIAMENTE (Aprox 8% de chance) ---
+                    if random.random() < 0.08:
+                        self._emit_log("info", "💬 Simulando humano: Abrindo e lendo comentários...")
+                        if self._click_node(xml_content, "comentário", exato=False) or self._click_node(xml_content, "comment", exato=False):
+                            self._sleep(2)
+                            # Desliza para baixo nos comentários
+                            self.swipe_proximo_video() 
+                            self._sleep(random.uniform(2.0, 4.0))
+                            # Tenta fechar os comentários
+                            xml_comments = self.obter_xml_tela()
+                            if not self.clicar_x_popup(xml_comments):
+                                self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                            self._sleep(1.5)
 
                     # --- EVASÃO PERIÓDICA AVANÇADA ---
                     self.executar_evasao_periodica(current_video_idx)
