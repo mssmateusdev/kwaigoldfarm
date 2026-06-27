@@ -28,6 +28,7 @@ import time
 import random
 import argparse
 import sys
+import re
 import os
 import logging
 import uiautomator2 as u2
