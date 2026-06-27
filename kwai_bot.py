@@ -995,6 +995,55 @@ class KwaiBot:
                     return True
         return False
 
+    def _clicar_botao_comentarios(self, xml_content: str) -> bool:
+        """Procura especificamente o botão de comentários do Kwai.
+        Filtra apenas botões do lado direito da tela para evitar clicar na descrição do vídeo ou perfil."""
+        import re
+        for match in re.finditer(r'<node[^>]*>', xml_content):
+            node_str = match.group(0)
+            
+            res_id_match = re.search(r'resource-id="([^"]*)"', node_str)
+            desc_match = re.search(r'content-desc="([^"]*)"', node_str)
+            text_match = re.search(r'text="([^"]*)"', node_str)
+            class_match = re.search(r'class="([^"]*)"', node_str)
+            
+            res_id = res_id_match.group(1).lower() if res_id_match else ""
+            desc = desc_match.group(1).lower() if desc_match else ""
+            text = text_match.group(1).lower() if text_match else ""
+            class_name = class_match.group(1).lower() if class_match else ""
+            
+            is_comment_node = False
+            if "comment" in res_id:
+                is_comment_node = True
+            elif ("comentá" in desc or "comenta" in desc) and "textview" not in class_name:
+                is_comment_node = True
+                
+            if is_comment_node:
+                bounds_match = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node_str)
+                if bounds_match:
+                    x1, y1, x2, y2 = map(int, bounds_match.groups())
+                    center_x = (x1 + x2) // 2
+                    center_y = (y1 + y2) // 2
+                    
+                    # O painel de botões do Kwai fica no canto direito (x > 70%)
+                    if hasattr(self, 'screen_width') and self.screen_width > 0:
+                        if center_x < (self.screen_width * 0.70):
+                            continue
+                            
+                    self._emit_log("info", f"💬 [Comentários] Botão de comentários encontrado via XML em ({center_x}, {center_y})")
+                    self.tap(center_x, center_y)
+                    return True
+                    
+        # Fallback posicional se o XML falhar (geralmente acima de compartilhar, na direita)
+        if hasattr(self, 'screen_width') and self.screen_width > 0:
+            fallback_x = int(self.screen_width * 0.92)
+            fallback_y = int(self.screen_height * 0.65)
+            self._emit_log("info", f"💬 [Comentários] Botão não detectado no XML. Usando fallback posicional em ({fallback_x}, {fallback_y})")
+            self.tap(fallback_x, fallback_y)
+            return True
+            
+        return False
+
     def _clicar_botao_sair(self, xml_content: str = None) -> bool:
         """Tenta encontrar e clicar no botão 'Sair' usando múltiplas estratégias.
         
@@ -1585,29 +1634,51 @@ class KwaiBot:
                     if current_video_idx % 15 == 0:
                         self.manter_tela_ligada()
 
-                    # --- VERIFICAR SE ESTÁ NA ABA 'PARA VOCÊ' ---
+                    # --- VERIFICAR SE ESTÁ NA TELA/ABA 'PARA VOCÊ' ---
+                    esta_na_for_you = False
                     para_voce_match = re.search(r'<node[^>]*text="Para você"[^>]*selected="([^"]+)"', xml_content, re.IGNORECASE)
                     if para_voce_match:
                         is_selected = para_voce_match.group(1).lower() == "true"
-                        if not is_selected:
-                            self._emit_log("info", "🔄 Retornando para a aba 'Para você'...")
+                        if is_selected:
+                            esta_na_for_you = True
+                        else:
+                            self._emit_log("info", "🔄 Detectado aba incorreta. Tentando clicar em 'Para você'...")
                             self._click_node(xml_content, "Para você", exato=False)
-                            self._sleep(2)
-                            xml_content = self.obter_xml_tela() # Atualiza o xml após mudar de aba
+                            self._sleep(2.5)
+                            xml_content = self.obter_xml_tela()
+                            if xml_content:
+                                match_nov = re.search(r'<node[^>]*text="Para você"[^>]*selected="([^"]+)"', xml_content, re.IGNORECASE)
+                                if match_nov and match_nov.group(1).lower() == "true":
+                                    esta_na_for_you = True
+
+                    if not esta_na_for_you:
+                        self._emit_log("warning", "⚠️ Fora da tela principal 'Para você'! Reiniciando o Kwai para reestabelecer o feed...")
+                        self.fechar_kwai()
+                        self._sleep(2.5)
+                        self.manter_tela_ligada()
+                        self.abrir_kwai()
+                        self._sleep(4.5)
+                        self.fechar_popups()
+                        self.ir_para_feed()
+                        self._sleep(2)
+                        consecutivas_lives = 0
+                        continue # Volta para o início do loop para reavaliar a tela
 
                     # --- ABRIR COMENTÁRIOS ALEATORIAMENTE (Aprox 8% de chance) ---
                     if random.random() < 0.08:
                         self._emit_log("info", "💬 Simulando humano: Abrindo e lendo comentários...")
-                        if self._click_node(xml_content, "comentário", exato=False) or self._click_node(xml_content, "comment", exato=False):
+                        if self._clicar_botao_comentarios(xml_content):
                             self._sleep(2)
                             # Desliza para baixo nos comentários
                             self.swipe_proximo_video() 
-                            self._sleep(random.uniform(2.0, 4.0))
+                            self._sleep(random.uniform(2.5, 5.0))
                             # Tenta fechar os comentários
                             xml_comments = self.obter_xml_tela()
                             if not self.clicar_x_popup(xml_comments):
                                 self.adb_shell("input", "keyevent", "KEYCODE_BACK")
-                            self._sleep(1.5)
+                            self._sleep(2)
+                            # Re-carrega o XML da tela pois fechamos os comentários
+                            xml_content = self.obter_xml_tela()
 
                     # --- EVASÃO PERIÓDICA AVANÇADA ---
                     self.executar_evasao_periodica(current_video_idx)
