@@ -1608,28 +1608,16 @@ class KwaiBot:
 
                     # --- DETECÇÃO E PULO DE LIVES ---
                     if self.detectar_live(xml_content):
-                        consecutivas_lives += 1
-                        if consecutivas_lives > 3:
-                            self._emit_log("warning", "⚠️ Preso em Lives! Forçando reinício do Kwai...")
-                            self.fechar_kwai()
-                            self._sleep(2)
-                            self.manter_tela_ligada()
-                            self.abrir_kwai()
-                            self._sleep(3)
-                            self.fechar_popups()
-                            self.ir_para_feed()
-                            self._sleep(2)
-                            consecutivas_lives = 0
-                            continue
-
-                        self._emit_log("info", f"📺 Live detectada ({consecutivas_lives}/3)! Apertando voltar e rolando para o próximo vídeo...")
-                        self.adb_shell("input", "keyevent", "KEYCODE_BACK")
-                        self._sleep(1.5)
-                        self.swipe_proximo_video()
-                        self._sleep(random.uniform(1.5, 3.0))
-                        continue  # Reinicia o loop para processar o próximo vídeo sem contar este como assistido
-                    else:
-                        consecutivas_lives = 0
+                        self._emit_log("warning", "🚨 Transmissão ao vivo (Live) detectada! Reiniciando o aplicativo...")
+                        self.fechar_kwai()
+                        self._sleep(2.5)
+                        self.manter_tela_ligada()
+                        self.abrir_kwai()
+                        self._sleep(4.5)
+                        self.fechar_popups()
+                        self.ir_para_feed()
+                        self._sleep(2)
+                        continue
 
                     if current_video_idx % 15 == 0:
                         self.manter_tela_ligada()
