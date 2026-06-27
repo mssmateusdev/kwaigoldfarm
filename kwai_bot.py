@@ -901,8 +901,8 @@ class KwaiBot:
                     center_y = (y1 + y2) // 2
                     
                     if hasattr(self, 'screen_width') and self.screen_width > 0:
-                        # Ignora o "X" do bônus Kwai Golds que fica no canto esquerdo da tela (ex: popup de moedas)
-                        if center_x < (self.screen_width * 0.35) and (self.screen_height * 0.3) < center_y < (self.screen_height * 0.7):
+                        # Ignora o "X" do bônus Kwai Golds no canto esquerdo da tela (independente da altura Y)
+                        if center_x < (self.screen_width * 0.38):
                             continue
                     
                     self._emit_log("info", f"🎯 [Popup] Botão de fechar detectado: id='{res_id}', desc='{desc}', text='{text}' em ({center_x}, {center_y})")
