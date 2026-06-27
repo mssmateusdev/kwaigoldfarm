@@ -1095,7 +1095,14 @@ class KwaiBot:
         while tempo_restante > 0 and self._running:
             while self._paused and self._running:
                 time.sleep(0.2)
-            intervalo = min(tempo_restante, 5.0)
+                
+            # Verifica se algum popup surgiu enquanto assistia o vídeo
+            xml_content = self.obter_xml_tela()
+            if xml_content and "xml" in xml_content:
+                if self.clicar_x_popup(xml_content):
+                    self._emit_log("info", "🎯 Popup interrompido fechado no meio do vídeo!")
+                    
+            intervalo = min(tempo_restante, 4.0)
             self._sleep(intervalo)
             tempo_restante -= intervalo
             if tempo_restante > 5 and random.random() < 0.1:
