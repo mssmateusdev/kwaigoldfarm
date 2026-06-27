@@ -866,6 +866,10 @@ class KwaiBot:
             desc = desc_match.group(1).lower().strip() if desc_match else ""
             text = text_match.group(1).lower().strip() if text_match else ""
             
+            # IGNORA campos de edição de texto (inputs, editores de comentários)
+            if "editor" in res_id or "edit" in res_id or "input" in res_id or "search" in res_id:
+                continue
+                
             found = False
             
             # 1. Verifica se o resource-id contem padrões de fechar
@@ -1640,7 +1644,31 @@ class KwaiBot:
                                     esta_na_for_you = True
 
                     if not esta_na_for_you:
-                        self._emit_log("warning", "⚠️ Fora da tela principal 'Para você'! Reiniciando o Kwai para reestabelecer o feed...")
+                        self._emit_log("warning", "⚠️ Fora da tela principal 'Para você'! Tentando recuperação rápida...")
+                        
+                        # Tenta voltar usando KEYCODE_BACK
+                        self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                        self._sleep(2.0)
+                        xml_content = self.obter_xml_tela()
+                        if xml_content:
+                            match_nov = re.search(r'<node[^>]*text="Para você"[^>]*selected="([^"]+)"', xml_content, re.IGNORECASE)
+                            if match_nov and match_nov.group(1).lower() == "true":
+                                self._emit_log("info", "✅ Recuperado com sucesso via botão voltar.")
+                                continue
+                                
+                        # Tenta ir para o feed clicando no botão Início
+                        self._emit_log("info", "🔄 Tentando ir para o feed via botão de Início...")
+                        self.ir_para_feed()
+                        self._sleep(2.0)
+                        xml_content = self.obter_xml_tela()
+                        if xml_content:
+                            match_nov = re.search(r'<node[^>]*text="Para você"[^>]*selected="([^"]+)"', xml_content, re.IGNORECASE)
+                            if match_nov and match_nov.group(1).lower() == "true":
+                                self._emit_log("info", "✅ Recuperado com sucesso via botão Início.")
+                                continue
+
+                        # Se tudo falhar, aí sim reinicia o aplicativo
+                        self._emit_log("warning", "🚨 Falha na recuperação rápida! Reiniciando o Kwai...")
                         self.fechar_kwai()
                         self._sleep(2.5)
                         self.manter_tela_ligada()
@@ -1652,21 +1680,26 @@ class KwaiBot:
                         consecutivas_lives = 0
                         continue # Volta para o início do loop para reavaliar a tela
 
-                    # --- ABRIR COMENTÁRIOS ALEATORIAMENTE (Aprox 8% de chance) ---
-                    if random.random() < 0.08:
+                    # --- ABRIR COMENTÁRIOS ALEATORIAMENTE (Aprox 5% de chance) ---
+                    if random.random() < 0.05:
                         self._emit_log("info", "💬 Simulando humano: Abrindo e lendo comentários...")
                         if self._clicar_botao_comentarios(xml_content):
-                            self._sleep(2)
-                            # Desliza para baixo nos comentários
+                            self._sleep(2.5)
+                            # Desliza para baixo nos comentários (apenas rola a lista)
                             self.swipe_proximo_video() 
-                            self._sleep(random.uniform(2.5, 5.0))
-                            # Tenta fechar os comentários
-                            xml_comments = self.obter_xml_tela()
-                            if not self.clicar_x_popup(xml_comments):
-                                self.adb_shell("input", "keyevent", "KEYCODE_BACK")
-                            self._sleep(2)
+                            self._sleep(random.uniform(3.0, 5.0))
+                            # Fecha os comentários apertando o botão voltar (como solicitado)
+                            self._emit_log("info", "💬 Fechando comentários apertando Voltar...")
+                            self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                            self._sleep(2.0)
                             # Re-carrega o XML da tela pois fechamos os comentários
                             xml_content = self.obter_xml_tela()
+                            if xml_content:
+                                match_nov = re.search(r'<node[^>]*text="Para você"[^>]*selected="([^"]+)"', xml_content, re.IGNORECASE)
+                                if match_nov and match_nov.group(1).lower() == "true":
+                                    esta_na_for_you = True
+
+
 
                     # --- EVASÃO PERIÓDICA AVANÇADA ---
                     self.executar_evasao_periodica(current_video_idx)
