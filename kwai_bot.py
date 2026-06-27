@@ -825,13 +825,7 @@ class KwaiBot:
                 self.swipe_proximo_video()
                 self._sleep(random.uniform(0.8, 2.0))
 
-        # 3. Desliga tela no final (simula colocar o celular de lado)
-        if random.random() < 0.25:
-            self._emit_log("info", "🛡️ [Evasão] Simulando desligamento de tela (celular de lado)...")
-            self.adb_shell("input", "keyevent", "KEYCODE_POWER")
-            self._sleep(random.uniform(2.0, 5.0))
-            self.adb_shell("input", "keyevent", "KEYCODE_WAKEUP")
-            self._sleep(1)
+
 
         self._emit_log("info", f"🛡️ [Evasão] Sessão encerrada. Total de evasões: {self._evasoes_executadas}")
 
