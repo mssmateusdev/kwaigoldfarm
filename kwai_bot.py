@@ -1517,6 +1517,342 @@ class KwaiBot:
             self._emit_log("error", f"Erro inesperado no Modo Anúncios: {e}")
             self.stats["erros"] += 1
 
+    def executar_modo_roleta(self):
+        """Automatiza o ciclo da roleta de prêmios do Kwai.
+
+        Fluxo:
+          1. Na tela da roleta → clica "Assistir" (ou "Receber" a cada 5/5)
+          2. Anúncio toca → aguarda "bônus"/"ganhou" no canto superior
+          3. Aperta BACK para voltar → roleta gira automaticamente
+          4. Aguarda "resgatar"/"clique para resgatar" → clica
+          5. Volta à tela da roleta → repete
+
+        O usuário deve estar na tela da roleta antes de iniciar.
+        """
+        self._emit_log("info", "=== FASE 3: Modo Roleta ===")
+        self._emit_log("info", "Aguardando na tela da Roleta (posicionada pelo usuário)...")
+
+        self.stats["inicio"] = datetime.now()
+        rodadas_processadas = 0
+        total_rodadas = self.config["total_videos"]  # Reutiliza o campo de total
+
+        TIMEOUT_ANUNCIO = 45   # Tempo máximo esperando anúncio terminar
+        TIMEOUT_ROLETA = 20    # Tempo máximo esperando roleta girar/resgatar
+        TIMEOUT_NAVEGANDO = 30 # Tempo máximo tentando voltar à tela da roleta
+
+        inicio_fase = time.monotonic()
+        tentativas_reinicio = 0
+        contador_ciclo = 0  # Conta de 1 a 5 para rastrear o ciclo 5/5
+
+        # Estados: NaRoleta, Assistindo, AguardandoRoleta, Navegando
+        estado = "NaRoleta"
+
+        try:
+            while rodadas_processadas < total_rodadas and self._running:
+                if self._on_progress:
+                    self._on_progress(rodadas_processadas + 1, total_rodadas)
+
+                if not self.verificar_kwai_aberto():
+                    self._emit_log("warning", "⚠️ Kwai não está em foco. Tentando recuperar com BACK...")
+                    self.stats["erros"] += 1
+                    self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                    self._sleep(3)
+                    continue
+
+                xml_content = self.obter_xml_tela()
+
+                if not xml_content or "xml" not in xml_content:
+                    self._sleep(2)
+                    continue
+
+                content_lower = xml_content.lower()
+
+                # Helper: detecta se estamos na tela da roleta
+                # Usa múltiplos indicadores: "assistir"/"receber", resource-id "cda_foundation", padrão N/5, "contagem regressiva"
+                def _na_tela_roleta() -> bool:
+                    if ("assistir" in content_lower and "assistir agora" not in content_lower) or "receber" in content_lower:
+                        return True
+                    if "cda_foundation" in content_lower:
+                        return True
+                    if re.search(r'\d/5', content_lower):
+                        return True
+                    if "contagem regressiva" in content_lower:
+                        return True
+                    if "sorteio" in content_lower:
+                        return True
+                    return False
+
+                # 🚨 VERIFICAÇÃO GLOBAL PRIORITÁRIA: Se "resgatar" estiver na tela, clica imediatamente!
+                if "resgatar" in content_lower:
+                    self._emit_log("info", "🎁 GLOBAL: 'Clique para resgatar' detectado na tela! Resgatando...")
+                    if not self._click_node(xml_content, "resgatar", exato=False):
+                        self.tap(self.screen_width // 2, int(self.screen_height * 0.81))
+                    self._sleep(4)
+                    
+                    if estado == "AguardandoRoleta":
+                        rodadas_processadas += 1
+                        self.stats["videos_assistidos"] += 1
+                        self._emit_stats()
+                        if contador_ciclo >= 5:
+                            self._emit_log("info", "⭐ Ciclo 5/5 completo! Próxima será a rodada extra (Receber).")
+                    
+                    estado = "NaRoleta"
+                    inicio_fase = time.monotonic()
+                    continue
+
+                # 🚨 VERIFICAÇÃO GLOBAL 2: Se detectar a tela da roleta e não estiver assistindo anúncio nem aguardando a roleta girar,
+                # garante que o estado seja "NaRoleta" para clicar no botão de Assistir.
+                if estado not in ("Assistindo", "AguardandoRoleta") and _na_tela_roleta():
+                    if estado != "NaRoleta":
+                        self._emit_log("info", f"🎰 Tela da roleta detectada! Forçando estado 'NaRoleta' (estado anterior: {estado}).")
+                        estado = "NaRoleta"
+
+                # ─── Estado: NaRoleta ───────────────────────────────
+                if estado == "NaRoleta":
+                    # Verifica se é rodada extra (5/5)
+                    is_rodada_extra = "receber" in content_lower or "5/5" in content_lower
+                    if is_rodada_extra:
+                        self._emit_log("info", "🌟 Rodada extra (5/5) detectada! Clicando em 'Receber'...")
+                        if self._click_node(xml_content, "receber", exato=False):
+                            self._sleep(3)
+                        else:
+                            # Fallback por coordenadas para o botão Receber (mesma posição do Assistir)
+                            btn_x = self.screen_width // 2
+                            btn_y = int(self.screen_height * 0.73)
+                            self._emit_log("info", f"🌟 Clicando em 'Receber' por coordenadas ({btn_x}, {btn_y})...")
+                            self.tap(btn_x, btn_y)
+                            self._sleep(3)
+                        estado = "AguardandoRoleta"
+                        inicio_fase = time.monotonic()
+                        contador_ciclo = 0
+                        continue
+
+                    # Verifica botão "Assistir" por texto no XML
+                    # PROTEÇÃO: Só clica em "Assistir" se estiver na tela da roleta
+                    # para evitar clicar no "Assistir agora" de anúncios que leva para fora do app
+                    if _na_tela_roleta():
+                        # Verifica se NÃO é "assistir agora" (botão de anúncio externo)
+                        has_assistir_agora = "assistir agora" in content_lower
+                        
+                        if not has_assistir_agora and self._click_node(xml_content, "assistir", exato=False):
+                            contador_ciclo += 1
+                            self._emit_log("info", f"🎰 Clicando em 'Assistir' ({contador_ciclo}/5)...")
+                            self._sleep(6)
+                            estado = "Assistindo"
+                            inicio_fase = time.monotonic()
+                            continue
+
+                        # Fallback: clica na posição do botão "Assistir" (botão verde grande na parte inferior da tela)
+                        btn_x = self.screen_width // 2
+                        btn_y = int(self.screen_height * 0.73)
+                        contador_ciclo += 1
+                        self._emit_log("info", f"🎰 Tela da roleta detectada. Clicando em 'Assistir' por coordenadas ({btn_x}, {btn_y}) ({contador_ciclo}/5)...")
+                        self.tap(btn_x, btn_y)
+                        self._sleep(6)
+                        estado = "Assistindo"
+                        inicio_fase = time.monotonic()
+                        continue
+
+                    # Verifica se há "clique para resgatar" (pode ter ficado pendente)
+                    if "resgatar" in content_lower:
+                        self._emit_log("info", "🎁 'Resgatar' pendente detectado! Clicando...")
+                        if self._click_node(xml_content, "resgatar", exato=False):
+                            self._sleep(3)
+                            rodadas_processadas += 1
+                            self.stats["videos_assistidos"] += 1
+                            self._emit_stats()
+                            continue
+                        else:
+                            self.tap(self.screen_width // 2, int(self.screen_height * 0.81))
+                            self._sleep(3)
+                            continue
+
+                    # Nada encontrado — loga conteúdo XML para debug e entra em modo de navegação
+                    # Extrai resource-ids únicos para ajudar no debug
+                    ids_encontrados = set(re.findall(r'resource-id="([^"]*)"', xml_content))
+                    ids_resumo = [rid.split('/')[-1] for rid in ids_encontrados if rid][:10]
+                    self._emit_log("warning", f"🎰 Tela da roleta não reconhecida. IDs na tela: {ids_resumo}")
+                    estado = "Navegando"
+                    inicio_fase = time.monotonic()
+
+                # ─── Estado: Assistindo ─────────────────────────────
+                elif estado == "Assistindo":
+                    # Aguarda o anúncio terminar — detecta "ganhou para bônus" no canto superior
+                    # NÃO clica em X nem em Sair. Apenas espera e aperta BACK quando o bônus aparece.
+                    tempo_decorrido = time.monotonic() - inicio_fase
+                    
+                    # Se já passou 12 segundos e AINDA estamos na tela da roleta,
+                    # significa que o anúncio não abriu (provavelmente bloqueado por resgate pendente)
+                    if tempo_decorrido >= 12 and _na_tela_roleta():
+                        self._emit_log("warning", "🎰 Detectado que o anúncio não abriu. Tentando clicar em 'Resgatar' por segurança...")
+                        self.tap(self.screen_width // 2, int(self.screen_height * 0.81))
+                        self._sleep(3)
+                        estado = "NaRoleta"
+                        inicio_fase = time.monotonic()
+                        continue
+                    
+                    bonus_detectado = False
+                    # Só verifica o bônus se já assistiu por pelo menos 10 segundos
+                    if tempo_decorrido >= 10:
+                        bonus_detectado = (
+                            "ganhou para bônus" in content_lower
+                            or "ganhou para bonus" in content_lower
+                            or "ganhou bônus" in content_lower
+                            or "ganhou bonus" in content_lower
+                            or "ganhou para" in content_lower
+                            or "para bônus" in content_lower
+                            or "para bonus" in content_lower
+                        )
+
+                    if bonus_detectado:
+                        self._emit_log("info", "🎁 Bônus/Ganhou detectado! Apertando BACK para voltar à roleta...")
+                        self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                        self._sleep(4)
+                        estado = "AguardandoRoleta"
+                        inicio_fase = time.monotonic()
+                        continue
+
+                    # Timeout de segurança — se demorar demais, tenta BACK (nunca X)
+                    tempo_decorrido = time.monotonic() - inicio_fase
+                    if tempo_decorrido > TIMEOUT_ANUNCIO:
+                        if _na_tela_roleta():
+                            self._emit_log("warning", "🎰 Timeout no anúncio mas tela da roleta detectada! Evitando BACK e indo para NaRoleta.")
+                            estado = "NaRoleta"
+                            inicio_fase = time.monotonic()
+                            continue
+                        self._emit_log("warning", f"⏳ Timeout anúncio ({TIMEOUT_ANUNCIO}s). Apertando BACK...")
+                        self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                        self._sleep(4)
+                        estado = "AguardandoRoleta"
+                        inicio_fase = time.monotonic()
+                        continue
+
+                    self._sleep(2)
+
+                # ─── Estado: AguardandoRoleta ───────────────────────
+                elif estado == "AguardandoRoleta":
+                    self._emit_log("info", "🎰 Aguardando a roleta girar e parar (8s)...")
+                    self._sleep(8)
+
+                    # 1. Trata popups de prêmio ("Ganhou um item") ou "SPIN" no centro da tela
+                    xml_popup = self.obter_xml_tela()
+                    content_popup_lower = xml_popup.lower() if xml_popup else ""
+
+                    has_popup = (
+                        "ganhou" in content_popup_lower 
+                        or "item" in content_popup_lower 
+                        or "spin" in content_popup_lower
+                        or "parabéns" in content_popup_lower
+                        or "cda_foundation" in content_popup_lower
+                    )
+                    
+                    if has_popup:
+                        self._emit_log("info", "🎁 Popup de prêmio ou 'SPIN' detectado. Clicando no centro para fechar...")
+                        self.tap(self.screen_width // 2, int(self.screen_height * 0.45))
+                        self._sleep(3)
+                    else:
+                        # Clica no centro preventivamente para garantir fechamento de popups
+                        self.tap(self.screen_width // 2, int(self.screen_height * 0.45))
+                        self._sleep(3)
+
+                    # 2. Clica no link "Clique para resgatar" que fica na parte inferior (Y ~ 81%)
+                    xml_recheck = self.obter_xml_tela()
+                    content_lower_recheck = xml_recheck.lower() if xml_recheck else ""
+
+                    if "resgatar" in content_lower_recheck:
+                        self._emit_log("info", "🎁 'Resgatar' detectado no XML! Clicando...")
+                        if not self._click_node(xml_recheck, "resgatar", exato=False):
+                            btn_resgatar_y = int(self.screen_height * 0.81)
+                            self.tap(self.screen_width // 2, btn_resgatar_y)
+                    else:
+                        btn_resgatar_y = int(self.screen_height * 0.81)
+                        self._emit_log("info", f"🎁 Clicando em 'Clique para resgatar' por coordenadas (Y=81% -> {btn_resgatar_y})...")
+                        self.tap(self.screen_width // 2, btn_resgatar_y)
+
+                    self._sleep(4)
+
+                    rodadas_processadas += 1
+                    self.stats["videos_assistidos"] += 1
+                    self._emit_stats()
+
+                    # Verifica se era a 5ª rodada (próxima será a rodada extra)
+                    if contador_ciclo >= 5:
+                        self._emit_log("info", "⭐ Ciclo 5/5 completo! Próxima será a rodada extra (Receber).")
+
+                    estado = "NaRoleta"
+                    inicio_fase = time.monotonic()
+                    continue
+
+                    self._sleep(2)
+
+                # ─── Estado: Navegando ──────────────────────────────
+                else:  # estado == "Navegando"
+                    tempo_navegando = time.monotonic() - inicio_fase
+
+                    # Verifica se voltou à tela da roleta (detecta cda_foundation ou N/5)
+                    if _na_tela_roleta():
+                        self._emit_log("info", "✅ [Navegando] Tela da roleta detectada!")
+                        estado = "NaRoleta"
+                        tentativas_reinicio = 0
+                        inicio_fase = time.monotonic()
+                        continue
+
+                    # Tenta fechar popups (apenas se NÃO estiver na tela da roleta)
+                    if self.clicar_x_popup(xml_content):
+                        self._emit_log("info", "🧭 [Navegando] Popup fechado. Verificando tela...")
+                        self._sleep(2)
+                        continue
+
+                    # Se na tela inicial do Kwai, tenta clicar no botão rosa
+                    if self._detectar_tela_inicial_kwai(xml_content):
+                        self._emit_log("info", "🏠 [Navegando] Tela inicial detectada. Procurando botão rosa...")
+                        if self._clicar_botao_rosa_kwai_golds(xml_content):
+                            self._emit_log("info", "🩷 [Navegando] Botão rosa clicado!")
+                            self._sleep(5)
+                            continue
+
+                    # Timeout de navegação — reinicia o app
+                    if tempo_navegando > TIMEOUT_NAVEGANDO:
+                        tentativas_reinicio += 1
+                        self._emit_log("warning", f"🚨 [Navegando] Timeout! Reiniciando app (tentativa {tentativas_reinicio})...")
+                        self.fechar_kwai()
+                        self._sleep(2)
+                        self.manter_tela_ligada()
+                        self.abrir_kwai()
+                        self._sleep(4)
+
+                        for _ in range(3):
+                            if not self._running:
+                                break
+                            xml_reopen = self.obter_xml_tela()
+                            if xml_reopen and "xml" in xml_reopen:
+                                if self.clicar_x_popup(xml_reopen):
+                                    self._sleep(2)
+                                    continue
+                                if self._clicar_botao_rosa_kwai_golds(xml_reopen):
+                                    self._emit_log("info", "🩷 [Navegando] Botão rosa clicado após reinício!")
+                                    self._sleep(5)
+                                    break
+                            self._sleep(2)
+
+                        inicio_fase = time.monotonic()
+                        continue
+
+                    # Fallback: tenta BACK (evita se estiver na roleta)
+                    if _na_tela_roleta():
+                        self._emit_log("info", "🎰 Navegando: Tela da roleta detectada antes de pressionar BACK! Indo para NaRoleta.")
+                        estado = "NaRoleta"
+                        continue
+
+                    self._emit_log("info", f"🧭 [Navegando] Tentando voltar ({tempo_navegando:.0f}s/{TIMEOUT_NAVEGANDO}s)...")
+                    self.adb_shell("input", "keyevent", "KEYCODE_BACK")
+                    self._sleep(3)
+
+        except Exception as e:
+            self._emit_log("error", f"Erro inesperado no Modo Roleta: {e}")
+            self.stats["erros"] += 1
+
+
     def pausa_longa(self):
         duracao = random.uniform(30, 90)
         self._emit_log("info", f"Pausa longa de {duracao:.0f}s...")
@@ -1554,6 +1890,10 @@ class KwaiBot:
             # No modo Anúncios, assume que o usuário já está na tela do Kwai Golds
             self._emit_log("info", "📢 Modo Anúncios: assumindo que já está na tela do Kwai Golds.")
             self.executar_modo_anuncios()
+        elif self.config.get("modo") == "Roleta":
+            # No modo Roleta, assume que o usuário já está na tela da roleta
+            self._emit_log("info", "🎰 Modo Roleta: assumindo que já está na tela da Roleta.")
+            self.executar_modo_roleta()
         else:
             # No modo Vídeos, faz o protocolo completo de inicialização
             self.protocolo_evasao_inicial()
